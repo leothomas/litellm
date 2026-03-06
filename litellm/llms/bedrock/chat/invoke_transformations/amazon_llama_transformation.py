@@ -59,6 +59,7 @@ class AmazonLlamaConfig(AmazonInvokeConfig, BaseConfig):
             "temperature",
             "top_p",
             "stream",
+            "logprobs",
         ]
 
     def map_openai_params(
@@ -77,4 +78,6 @@ class AmazonLlamaConfig(AmazonInvokeConfig, BaseConfig):
                 optional_params["top_p"] = v
             if k == "stream":
                 optional_params["stream"] = v
+            if k == "logprobs" and v:
+                optional_params["return_logprobs"] = True
         return optional_params

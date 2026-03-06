@@ -25,7 +25,12 @@ from litellm.llms.custom_httpx.http_handler import (
     _get_httpx_client,
 )
 from litellm.types.llms.openai import AllMessageValues
-from litellm.types.utils import ModelResponse, Usage
+from litellm.types.utils import (
+    ChatCompletionTokenLogprob,
+    ChoiceLogprobs,
+    ModelResponse,
+    Usage,
+)
 from litellm.utils import CustomStreamWrapper
 
 if TYPE_CHECKING:
@@ -282,6 +287,7 @@ class AmazonInvokeConfig(BaseConfig, BaseAWSLLM):
         )
         provider = self.get_bedrock_invoke_provider(model)
         outputText: Optional[str] = None
+        raw_logprobs: Optional[list] = None
         try:
             if provider == "cohere":
                 if "text" in completion_response:
@@ -337,6 +343,7 @@ class AmazonInvokeConfig(BaseConfig, BaseAWSLLM):
                 )
             elif provider == "meta" or provider == "llama" or provider == "deepseek_r1":
                 outputText = completion_response["generation"]
+                raw_logprobs = completion_response.get("logprobs") or None
             elif provider == "mistral":
                 outputText = litellm.AmazonMistralConfig.get_outputText(
                     completion_response, model_response
@@ -374,6 +381,21 @@ class AmazonInvokeConfig(BaseConfig, BaseAWSLLM):
                     outputText, str(e)
                 ),
                 status_code=raw_response.status_code,
+            )
+
+        if raw_logprobs:
+            token_logprobs = []
+            for item in raw_logprobs:
+                for token_id, logprob in item.items():
+                    token_logprobs.append(
+                        ChatCompletionTokenLogprob(
+                            token=str(token_id),
+                            logprob=float(logprob),
+                            top_logprobs=[],
+                        )
+                    )
+            model_response.choices[0].logprobs = ChoiceLogprobs(  # type: ignore
+                content=token_logprobs
             )
 
         ## CALCULATING USAGE - bedrock returns usage in the headers
