@@ -68,6 +68,11 @@ model LiteLLM_AgentsTable {
   agent_access_groups String[]       @default([])
   object_permission_id String?
   object_permission LiteLLM_ObjectPermissionTable? @relation(fields: [object_permission_id], references: [object_permission_id])
+  spend      Float    @default(0.0)
+  tpm_limit  Int?
+  rpm_limit  Int?
+  session_tpm_limit Int?
+  session_rpm_limit Int?
   created_at    DateTime               @default(now()) @map("created_at")
   created_by String
   updated_at    DateTime               @default(now()) @updatedAt @map("updated_at")
@@ -310,6 +315,15 @@ model LiteLLM_MCPServerTable {
   is_byok               Boolean  @default(false)
   byok_description      String[] @default([])
   byok_api_key_help_url String?
+  source_url            String?
+  // BYOM submission lifecycle
+  approval_status  String?   @default("active")
+  submitted_by     String?
+  submitted_at     DateTime?
+  reviewed_at      DateTime?
+  review_notes     String?
+
+  @@index([approval_status])
 }
 
 // Per-user BYOK credentials for MCP servers
@@ -383,6 +397,9 @@ model LiteLLM_VerificationToken {
 
     // SELECT ... FROM "public"."LiteLLM_VerificationToken" WHERE (("public"."LiteLLM_VerificationToken"."expires" IS NULL OR "public"."LiteLLM_VerificationToken"."expires" > $1) AND "public"."LiteLLM_VerificationToken"."budget_reset_at" < $2) OFFSET $3
     @@index([budget_reset_at, expires])
+
+    // SELECT ... FROM "public"."LiteLLM_VerificationToken" WHERE (...) ORDER BY "public"."LiteLLM_VerificationToken"."key_alias" ASC
+    @@index([key_alias])
 }
 
 model LiteLLM_JWTKeyMapping {
@@ -548,6 +565,9 @@ model LiteLLM_SpendLogs {
   @@index([startTime, request_id])
   @@index([end_user])
   @@index([session_id])
+
+  // SELECT ... FROM "LiteLLM_SpendLogs" WHERE ("startTime" >= $1 AND "startTime" <= $2 AND "user" = $3) GROUP BY ...
+  @@index([user, startTime])
 }
 
 // View spend, model, api_key per request
@@ -1057,6 +1077,14 @@ model LiteLLM_UISettings {
   updated_at DateTime @updatedAt
 }
 
+// Generic config overrides table - one row per config_type
+model LiteLLM_ConfigOverrides {
+  config_type  String   @id
+  config_value Json
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+}
+
 // Skills table for storing LiteLLM-managed skills
 model LiteLLM_SkillsTable {
   skill_id       String   @id @default(uuid())
@@ -1139,6 +1167,7 @@ model LiteLLM_ToolTable {
   @@index([team_id])
 }
 
+// Per-(tool, team/key) policy overrides. When present, override replaces global tool policy for that scope.
 //Unified Access Groups table for storing unified access groups
 model LiteLLM_AccessGroupTable {
   access_group_id    String   @id @default(uuid())

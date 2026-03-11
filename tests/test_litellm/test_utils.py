@@ -507,6 +507,7 @@ def validate_model_cost_values(model_data, exceptions=None):
         "input_cost_per_audio_token",
         "output_cost_per_audio_token",
         "output_cost_per_image_token",
+        "output_cost_per_image_token_batches",
         "input_cost_per_audio_per_second",
         "input_cost_per_video_per_second",
         "input_cost_per_token_above_128k_tokens",
@@ -696,6 +697,7 @@ def test_aaamodel_prices_and_context_window_json_is_valid():
                 "output_cost_per_character_above_128k_tokens": {"type": "number"},
                 "output_cost_per_image": {"type": "number"},
                 "output_cost_per_image_token": {"type": "number"},
+                "output_cost_per_image_token_batches": {"type": "number"},
                 "output_cost_per_pixel": {"type": "number"},
                 "output_cost_per_second": {"type": "number"},
                 "output_cost_per_token": {"type": "number"},
@@ -764,6 +766,7 @@ def test_aaamodel_prices_and_context_window_json_is_valid():
                             "/v1/audio/transcriptions",
                             "/v1/audio/speech",
                             "/v1/ocr",
+                            "/vertex_ai/live",
                         ],
                     },
                 },
@@ -2941,6 +2944,38 @@ class TestIsCachedMessage:
         message = {"role": "user", "content": []}
         assert is_cached_message(message) is False
 
+    def test_message_level_cache_control_returns_true(self):
+        """Message with string content and message-level cache_control should return True.
+
+        This is the format injected by the cache_control_injection_points hook
+        when the message content is a string (common for system messages).
+        Fixes GitHub issue #18519 - Gemini models ignoring cache_control_injection_points.
+        """
+        message = {
+            "role": "system",
+            "content": "You are a helpful assistant.",
+            "cache_control": {"type": "ephemeral"},
+        }
+        assert is_cached_message(message) is True
+
+    def test_message_level_cache_control_wrong_type_returns_false(self):
+        """Message-level cache_control with non-ephemeral type should return False."""
+        message = {
+            "role": "system",
+            "content": "You are a helpful assistant.",
+            "cache_control": {"type": "permanent"},
+        }
+        assert is_cached_message(message) is False
+
+    def test_message_level_cache_control_non_dict_returns_false(self):
+        """Message-level cache_control that's not a dict should return False."""
+        message = {
+            "role": "system",
+            "content": "You are a helpful assistant.",
+            "cache_control": "ephemeral",
+        }
+        assert is_cached_message(message) is False
+
 
 @pytest.mark.asyncio
 class TestProxyLoggingBudgetAlerts:
@@ -3471,6 +3506,53 @@ class TestDropParamsWithPromptCacheKey:
         assert "prompt_cache_key" not in result
         # temperature should remain (it's supported by Bedrock)
         assert result.get("temperature") == 0.7
+
+
+class TestGetOptionalParamsDeepSeek:
+    """Tests that deepseek provider uses DeepSeekChatConfig for parameter mapping."""
+
+    def test_deepseek_supports_thinking_param(self):
+        """
+        Verify that get_optional_params for deepseek accepts the 'thinking' param,
+        which is only supported by DeepSeekChatConfig, not OpenAIConfig.
+        """
+        from litellm.utils import get_optional_params
+
+        result = get_optional_params(
+            model="deepseek-reasoner",
+            custom_llm_provider="deepseek",
+            thinking={"type": "enabled"},
+        )
+        assert result.get("thinking") == {"type": "enabled"}
+
+    def test_deepseek_supports_reasoning_effort_param(self):
+        """
+        Verify that get_optional_params for deepseek accepts 'reasoning_effort',
+        which is only supported by DeepSeekChatConfig, not OpenAIConfig.
+        """
+        from litellm.utils import get_optional_params
+
+        result = get_optional_params(
+            model="deepseek-reasoner",
+            custom_llm_provider="deepseek",
+            reasoning_effort="high",
+        )
+        assert result.get("thinking") == {"type": "enabled"}
+
+    def test_deepseek_thinking_strips_budget_tokens(self):
+        """
+        DeepSeekChatConfig strips budget_tokens from thinking param.
+        This would not happen with OpenAIConfig.
+        """
+        from litellm.utils import get_optional_params
+
+        result = get_optional_params(
+            model="deepseek-reasoner",
+            custom_llm_provider="deepseek",
+            thinking={"type": "enabled", "budget_tokens": 5000},
+        )
+        assert "budget_tokens" not in result.get("thinking", {})
+        assert result.get("thinking") == {"type": "enabled"}
 
 
 class TestIsStreamingRequest:
